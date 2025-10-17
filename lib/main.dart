@@ -129,6 +129,13 @@ class _YtbDownloaderState extends State<YtbDownloader> {
   final TextEditingController _urlController = TextEditingController();
   final List<DownloadCard> _downloads = [];
   bool _fetching = false;
+  final FocusNode _urlFocusNode = FocusNode(); // Add FocusNode
+  @override
+  void dispose() {
+    _urlController.dispose();
+    _urlFocusNode.dispose(); // Dispose FocusNode
+    super.dispose();
+  }
 
   void _showIOSBanner(String title, String subtitle, {bool isError = false}) {
     showCupertinoDialog(
@@ -209,7 +216,6 @@ class _YtbDownloaderState extends State<YtbDownloader> {
           thumbnail: info.thumbnail,
           showBanner: _showIOSBanner,
           isPlaylist: false,
-          videoCount: null,
         );
         setState(() => _downloads.insert(0, card));
         _showIOSBanner("Download ready", info.title);
@@ -350,8 +356,11 @@ class _YtbDownloaderState extends State<YtbDownloader> {
                   Flexible(
                     child: CupertinoTextField(
                       controller: _urlController,
-                      placeholder: "Enter Video or Playlist URL",
-                      autofocus: false,
+                      placeholder: "Enter Video or Playlists URL",
+                      focusNode: _urlFocusNode, // Assign FocusNode
+                      onTapOutside: (event) {
+                        _urlFocusNode.unfocus(); // Unfocus when tapping outside
+                      },
                       padding: EdgeInsets.all(padding),
                       clearButtonMode: OverlayVisibilityMode.editing,
                       style: TextStyle(
@@ -435,112 +444,134 @@ class DownloadCard extends StatefulWidget {
 class _DownloadCardState extends State<DownloadCard> {
   bool _downloading = false;
   double _progress = 0.0;
+  final Map<String, double> _videoProgress = {};
+  int _tasksCompleted = 0;
   int _playlistTotal = 0;
-  int _playlistCompleted = 0;
+  bool _completedShown = false;
 
   String _sanitizeFilename(String name) {
     return name.replaceAll(RegExp(r'[\\/:*?"<>|$]'), '_');
   }
 
-  Future<void> _download() async {
-    if (_downloading) return;
+  void _startDownload() async {
+    setState(() {
+      _downloading = true;
+      _completedShown = false;
+      _videoProgress.clear();
+      _progress = 0.0;
+      _tasksCompleted = 0;
+      _playlistTotal = 0;
+    });
 
-    Future<void> confirmDownload() async {
+    widget.showBanner("Download started", widget.title);
+
+    try {
+      PermissionStatus status =
+          await Permission.manageExternalStorage.request();
+      if (!status.isGranted) {
+        status = await Permission.storage.request();
+      }
+      if (!status.isGranted) {
+        throw "Storage permission denied!";
+      }
+
+      final dir = Directory('/storage/emulated/0/Download/MP3tube');
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+
+      List<VideoInfoData> videos;
+      if (widget.isPlaylist) {
+        videos = await fetchPlaylistVideos(widget.url);
+      } else {
+        videos = [
+          VideoInfoData(
+            title: widget.title,
+            author: widget.author,
+            duration: widget.duration is Duration ? widget.duration : null,
+            thumbnail: widget.thumbnail,
+            url: widget.url,
+          )
+        ];
+      }
+
       setState(() {
-        _downloading = true;
-        _progress = 0;
+        _playlistTotal = videos.length;
       });
 
-      widget.showBanner("Download started", widget.title);
+      for (final video in videos) {
+        final safeTitle = _sanitizeFilename("${video.title}.mp3");
+        final fullPath = '${dir.path}/$safeTitle';
+        final task = DownloadTask(video.url);
+        _videoProgress[video.url] = 0.0;
 
-      try {
-        PermissionStatus status =
-            await Permission.manageExternalStorage.request();
-        if (!status.isGranted) {
-          status = await Permission.storage.request();
-        }
-        if (!status.isGranted) {
-          throw "Storage permission denied!";
-        }
+        task.progressStream.listen(
+          (p) {
+            if (mounted) {
+              setState(() {
+                _videoProgress[video.url] = p;
+                final values = _videoProgress.values;
+                if (values.isNotEmpty) {
+                  _progress = values.reduce((a, b) => a + b) / values.length;
+                }
+              });
+            }
+          },
+          onError: (e) {
+            widget.showBanner(
+                "Download failed for ${video.title}", e.toString(),
+                isError: true);
+          },
+          onDone: () {
+            if (mounted) {
+              setState(() {
+                _tasksCompleted++;
+                if (_tasksCompleted == _playlistTotal) {
+                  _downloading = false;
+                  if (!_completedShown) {
+                    _completedShown = true;
+                    widget.showBanner("Download completed", widget.title);
+                  }
+                }
+              });
+            }
+          },
+        );
 
-        final dir = Directory('/storage/emulated/0/Download/MP3tube');
-        if (!await dir.exists()) {
-          await dir.create(recursive: true);
-        }
-
-        if (widget.isPlaylist) {
-          final videos = await fetchPlaylistVideos(widget.url);
-          setState(() {
-            _playlistTotal = videos.length;
-            _playlistCompleted = 0;
-          });
-          List<Future<void>> futures = [];
-          List<double> progresses = List.filled(_playlistTotal, 0.0);
-          for (int i = 0; i < videos.length; i++) {
-            final video = videos[i];
-            final safeTitle = _sanitizeFilename("${video.title}.mp3");
-            final fullPath = '${dir.path}/$safeTitle';
-            final fut = downloadYoutubeAudio(
+        final downloadFunc = () async {
+          try {
+            await downloadYoutubeAudio(
               video.url,
               fullPath,
-              onProgress: (p) {
-                progresses[i] = p;
-                final avg = progresses.reduce((a, b) => a + b) / _playlistTotal;
-                setState(() => _progress = avg);
-              },
-            ).then((_) async {
-              setState(() {
-                _playlistCompleted++;
-              });
-              if (Platform.isAndroid) {
-                await Process.run('am', [
-                  'broadcast',
-                  '-a',
-                  'android.intent.action.MEDIA_SCANNER_SCAN_FILE',
-                  '-d',
-                  'file://$fullPath',
-                ]);
-              }
-            }).catchError((e) {
-              widget.showBanner(
-                  "Failed to download ${video.title}", e.toString(),
-                  isError: true);
-            });
-            futures.add(fut);
+              onProgress: (p) => task.updateProgress(p),
+            );
+            if (Platform.isAndroid) {
+              await Process.run('am', [
+                'broadcast',
+                '-a',
+                'android.intent.action.MEDIA_SCANNER_SCAN_FILE',
+                '-d',
+                'file://$fullPath',
+              ]);
+            }
+          } catch (e) {
+            task.progressCtrl.addError(e);
+            rethrow;
+          } finally {
+            task.closeProgress();
           }
-          await Future.wait(futures);
-          widget.showBanner("Playlist download completed", widget.title);
-        } else {
-          final safeTitle = _sanitizeFilename("${widget.title}.mp3");
-          final fullPath = '${dir.path}/$safeTitle';
-          await downloadYoutubeAudio(
-            widget.url,
-            fullPath,
-            onProgress: (percent) {
-              setState(() => _progress = percent);
-            },
-          );
-          if (Platform.isAndroid) {
-            await Process.run('am', [
-              'broadcast',
-              '-a',
-              'android.intent.action.MEDIA_SCANNER_SCAN_FILE',
-              '-d',
-              'file://$fullPath',
-            ]);
-          }
-          widget.showBanner("Download completed", safeTitle);
-        }
+        };
 
-        setState(() {
-          _progress = 1.0;
-          _downloading = false;
-        });
-      } catch (e) {
-        setState(() => _downloading = false);
-        widget.showBanner("Download failed", e.toString(), isError: true);
+        DownloadManager.instance.enqueue(downloadFunc);
       }
+    } catch (e) {
+      setState(() => _downloading = false);
+      widget.showBanner("Download failed", e.toString(), isError: true);
     }
+  }
+
+  void _download() {
+    if (_downloading) return;
 
     if (widget.isPlaylist) {
       showCupertinoDialog(
@@ -575,7 +606,7 @@ class _DownloadCardState extends State<DownloadCard> {
                 isDefaultAction: true,
                 onPressed: () {
                   Navigator.of(context).pop();
-                  confirmDownload();
+                  _startDownload();
                 },
                 child: Text(
                   "Download Playlist Audio",
@@ -602,7 +633,7 @@ class _DownloadCardState extends State<DownloadCard> {
         },
       );
     } else {
-      confirmDownload();
+      _startDownload();
     }
   }
 
@@ -664,10 +695,13 @@ class _DownloadCardState extends State<DownloadCard> {
                     Positioned(
                       bottom: 0,
                       right: 0,
-                      child: Icon(
-                        Icons.playlist_play,
-                        color: Colors.white,
-                        size: 30 * textScale,
+                      child: Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Icon(
+                          CupertinoIcons.music_note_list,
+                          color: CupertinoColors.white,
+                          size: 30 * textScale,
+                        ),
                       ),
                     ),
                 ],
@@ -721,7 +755,7 @@ class _DownloadCardState extends State<DownloadCard> {
               ),
             if (widget.isPlaylist && _downloading)
               Text(
-                "Playlist Progress: ${(_progress * 100).toStringAsFixed(0)}% ($_playlistCompleted/$_playlistTotal)",
+                "Playlist Progress: ${(_progress * 100).toStringAsFixed(0)}% ($_tasksCompleted/$_playlistTotal)",
                 style: TextStyle(
                   color: isDark
                       ? CupertinoColors.systemGrey2
@@ -753,7 +787,7 @@ class _DownloadCardState extends State<DownloadCard> {
                       )
                     : Text(
                         widget.isPlaylist
-                            ? "Download Playlist MP3"
+                            ? "Download Playlist Audio"
                             : "Download MP3",
                         style: TextStyle(
                           fontSize: 16 * textScale,

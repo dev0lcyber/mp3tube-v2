@@ -1,5 +1,54 @@
+import 'dart:async';
+import 'dart:collection';
 import 'dart:io';
 import 'package:youtube_explode_dart_alpha/youtube_explode_dart_alpha.dart';
+
+class DownloadManager {
+  static final DownloadManager instance = DownloadManager._();
+  DownloadManager._();
+
+  final int maxConcurrent = 5;
+  int _active = 0;
+  final Queue<Future<void> Function()> _queue =
+      Queue<Future<void> Function()>();
+
+  void enqueue(Future<void> Function() downloadFunc) {
+    _queue.add(downloadFunc);
+    _processQueue();
+  }
+
+  void _processQueue() {
+    while (_active < maxConcurrent && _queue.isNotEmpty) {
+      _active++;
+      final func = _queue.removeFirst();
+      func().whenComplete(() {
+        _active--;
+        _processQueue();
+      });
+    }
+  }
+}
+
+class DownloadTask {
+  final String taskId;
+  final StreamController<double> progressCtrl =
+      StreamController<double>.broadcast();
+  Stream<double> get progressStream => progressCtrl.stream;
+
+  DownloadTask(this.taskId);
+
+  void updateProgress(double p) {
+    if (!progressCtrl.isClosed) {
+      progressCtrl.add(p.clamp(0.0, 1.0));
+    }
+  }
+
+  void closeProgress() {
+    if (!progressCtrl.isClosed) {
+      progressCtrl.close();
+    }
+  }
+}
 
 /// Sanitizes filename by removing invalid characters
 String sanitizeFilename(String input) {
@@ -94,15 +143,21 @@ Future<VideoInfoData> fetchVideoInfo(String videoUrl) async {
   }
 }
 
-/// Fetch playlist info and return as VideoInfoData
+/// Fetch playlist info and return as VideoInfoData with first video thumbnail if possible
 Future<VideoInfoData> fetchPlaylistInfo(String playlistUrl) async {
   final yt = YoutubeExplode();
   try {
     final playlist = await yt.playlists.get(playlistUrl);
+    String thumbnail = playlist.thumbnails.standardResUrl;
+    try {
+      final firstVideo = await yt.playlists.getVideos(playlist.id).first;
+      final firstThumb = firstVideo.thumbnails.standardResUrl;
+      if (firstThumb.isNotEmpty) thumbnail = firstThumb;
+    } catch (_) {}
     return VideoInfoData(
       title: playlist.title,
       author: playlist.author,
-      thumbnail: playlist.thumbnails.standardResUrl,
+      thumbnail: thumbnail,
       url: playlistUrl,
       videoCount: playlist.videoCount,
     );

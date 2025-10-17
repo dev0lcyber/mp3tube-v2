@@ -1,0 +1,51 @@
+name: "MP3TUBE"
+description: "Download YouTube videos as MP3 quickly and easily."
+
+publish_to: 'none'
+
+version: 2.2.0+1
+
+environment:
+  sdk: ">=2.17.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  youtube_explode_dart_alpha: ^2.5.3
+  path_provider: ^2.1.4
+  permission_handler: ^11.3.1
+  url_launcher: ^6.3.1
+  logging: ^1.2.0
+  path: ^1.9.0
+  overlay_support: ^2.1.0
+  cached_network_image: ^3.4.1
+  bot_toast: ^4.1.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  flutter_native_splash: ^2.3.1
+  flutter_launcher_icons: ^0.14.4
+  flutter_media_store: ^1.3.1
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/splash.png
+    - assets/icon/icon.png
+
+flutter_native_splash:
+  color: "#ffffff"
+  image: assets/splash.png
+  android: true
+  ios: true
+  fullscreen: true
+
+flutter_icons:
+  android: true
+  ios: true
+  windows:
+    generate: true
+  image_path: "assets/icon/icon.png"

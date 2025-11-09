@@ -70,7 +70,7 @@ It features a clean iOS-style interface, fast performance, and automatic file ma
 ## 🎬 App Demo
 
 See how MP3Tube works:  
-[▶ Watch Showcase Video](mp3tube_pics/showcase-video.mp4)
+[▶ Watch Showcase Video](mp3tube_pics/showcase-video.gif)
 
 ---
 
@@ -111,5 +111,6 @@ Feel free to use, modify, or share it responsibly.
 ---
 
 > _MP3Tube — Simple. Fast. Free._
+
 
 

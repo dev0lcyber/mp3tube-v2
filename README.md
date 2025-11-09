@@ -95,6 +95,19 @@ See how MP3Tube works:
 
 ---
 
+## 🧾 TODO
+
+- [ ] Add MP4 download option  
+- [ ] Support background downloads  
+- [ ] Implement progress persistence after app restart  
+- [ ] Add ID3 tags (artist, album, thumbnail)  
+- [ ] Build iOS-compatible version  
+- [ ] Improve error handling for invalid links  
+- [ ] Optimize playlist download speed  
+- [ ] Publish to Google Play  
+
+---
+
 ## ⚖️ License
 
 This project is licensed under the **MIT License**.  
@@ -111,6 +124,7 @@ Feel free to use, modify, or share it responsibly.
 ---
 
 > _MP3Tube — Simple. Fast. Free._
+
 
 
 
